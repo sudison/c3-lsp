@@ -225,10 +225,11 @@ fn void Parser.synchronize(&self)
 /**
  * Parse a complete program (translation unit)
  */
-fn AstNode** Parser.parse(&self)
+fn AstTranslationUnit* Parser.parse(&self, String filename = "")
 {
-    AstNode** declarations = null;
-    
+    AstTranslationUnit* translation_unit = self.allocate_node(AstTranslationUnit);
+    translation_unit.init(filename, self.allocator);
+
     while (!self.check(TokenType.EOF) && self.error_count <= self.max_errors)
     {
         // Skip whitespace and comments for better error recovery
@@ -244,8 +245,7 @@ fn AstNode** Parser.parse(&self)
         AstDecl* decl = self.parse_declaration();
         if (decl != null)
         {
-            // Add to declarations array (simplified - would need proper dynamic array)
-            // declarations.push(decl);
+            translation_unit.add_declaration(decl);
         }
 
         // If we're in panic mode, synchronize to find a safe point
@@ -268,8 +268,8 @@ fn AstNode** Parser.parse(&self)
             }
         }
     }
-    
-    return declarations;
+
+    return translation_unit;
 }
 
 // Expression parsing functions
@@ -349,6 +349,10 @@ fn AstExpr* Parser.parse_binary(&self, AstExpr* left)
     binary.left = left;
     binary.right = right;
 
+    // Set parent relationships
+    if (left != null) left.node.set_parent((AstNode*)binary);
+    if (right != null) right.node.set_parent((AstNode*)binary);
+
     return (AstExpr*)binary;
 }
 
@@ -366,6 +370,9 @@ fn AstExpr* Parser.parse_unary(&self)
     unary.expr.node.span = operator_span;
     unary.op = token_to_unary_op(operator_type);
     unary.operand = operand;
+
+    // Set parent relationship
+    if (operand != null) operand.node.set_parent((AstNode*)unary);
 
     return (AstExpr*)unary;
 }
@@ -705,12 +712,8 @@ fn AstDecl* Parser.parse_declaration(&self)
 fn AstDecl* Parser.parse_import_declaration(&self)
 {
     AstImportDecl* import_decl = self.allocate_node(AstImportDecl);
-    import_decl.decl.node.kind = AST_DECL_IMPORT;
+    import_decl.init(self.allocator);
     import_decl.decl.node.span = self.previous_token.span;
-    import_decl.decl.name = ""; // Import declarations don't have a single name
-
-    // Initialize dynamic list for import paths
-    import_decl.paths.init(self.allocator);
 
     // Skip whitespace before first import path
     while (self.current_token.type == TokenType.WHITESPACE ||
@@ -720,18 +723,14 @@ fn AstDecl* Parser.parse_import_declaration(&self)
     }
 
     do {
-        // Parse a single import path (e.g., std::io::file)
-        String path = self.parse_import_path();
-        if (path.len == 0)
+        // Parse a single import path as identifier nodes (e.g., std::io::file)
+        if (!self.parse_import_path_identifiers(import_decl))
         {
             self.error_at_current("Expected import path");
             // Try to recover by synchronizing to next statement
             self.synchronize();
             break;
         }
-
-        // Add to paths dynamic list
-        import_decl.paths.push(path);
 
         // Skip whitespace before comma or semicolon
         while (self.current_token.type == TokenType.WHITESPACE ||
@@ -760,9 +759,9 @@ fn AstDecl* Parser.parse_import_declaration(&self)
 }
 
 /**
- * Parse a single import path (e.g., std::io::file)
+ * Parse a single import path as identifier nodes (e.g., std::io::file)
  */
-fn String Parser.parse_import_path(&self)
+fn bool Parser.parse_import_path_identifiers(&self, AstImportDecl* import_decl)
 {
     // Skip whitespace before parsing the path
     while (self.current_token.type == TokenType.WHITESPACE ||
@@ -773,13 +772,17 @@ fn String Parser.parse_import_path(&self)
 
     if (!self.check(TokenType.IDENT))
     {
-        return "";
+        return false;
     }
 
-    // Build the path using the parser's allocator
-    DString path_builder = dstring::new_with_capacity(self.allocator, 256);
-    path_builder.append(self.current_token.lexeme);
+    // Parse first identifier
+    AstIdentifier* first_ident = self.allocate_node(AstIdentifier);
+    first_ident.expr.node.kind = AST_EXPR_IDENTIFIER;
+    first_ident.expr.node.span = self.current_token.span;
+    first_ident.name = self.current_token.lexeme;
     self.advance();
+
+    import_decl.add_identifier(first_ident);
 
     // Handle :: separators for nested modules
     while (self.match(TokenType.SCOPE))
@@ -794,16 +797,20 @@ fn String Parser.parse_import_path(&self)
         if (!self.check(TokenType.IDENT))
         {
             self.error_at_current("Expected identifier after '::'");
-            break;
+            return false;
         }
 
-        // Concatenate the path with :: separator
-        path_builder.append("::");
-        path_builder.append(self.current_token.lexeme);
+        // Create identifier node for this part of the path
+        AstIdentifier* ident = self.allocate_node(AstIdentifier);
+        ident.expr.node.kind = AST_EXPR_IDENTIFIER;
+        ident.expr.node.span = self.current_token.span;
+        ident.name = self.current_token.lexeme;
         self.advance();
+
+        import_decl.add_identifier(ident);
     }
 
-    return path_builder.str_view();
+    return true;
 }
 
 /**
