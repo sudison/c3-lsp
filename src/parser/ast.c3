@@ -326,13 +326,24 @@ struct AstStructDecl
 }
 
 /**
+ * Position in source code (line/column, 0-based)
+ */
+struct SourcePosition
+{
+    uint line;      // 0-based line number
+    uint column;    // 0-based column number (byte offset within line)
+}
+
+/**
  * Translation Unit - represents a source file (root AST node)
  */
 struct AstTranslationUnit
 {
     inline AstNode node;
     String filename;                    // Source file name
+    String source_text;                 // Original source code text
     List{AstDecl*} declarations;       // Top-level declarations in the file
+    List{uint} line_map;               // Maps line numbers to byte offsets in source_text
 }
 
 /**
@@ -375,6 +386,9 @@ union AstNodeUnion
 
     // Root node
     AstTranslationUnit translation_unit;
+
+    // Position types
+    SourcePosition source_position;
 
     // Specific expression types
     AstLiteral literal;
@@ -487,14 +501,19 @@ fn AstNode* AstNode.find_common_ancestor(&self, AstNode* other)
  */
 
 /**
- * Initialize a translation unit with allocator
+ * Initialize a translation unit with allocator and source text
  */
-fn void AstTranslationUnit.init(&self, String filename, Allocator allocator)
+fn void AstTranslationUnit.init(&self, String filename, String source_text, Allocator allocator)
 {
     self.node.kind = AST_TRANSLATION_UNIT;
     self.node.parent = null;
     self.filename = filename;
+    self.source_text = source_text;
     self.declarations.init(allocator);
+    self.line_map.init(allocator);
+
+    // Build line map
+    self.build_line_map();
 }
 
 /**
@@ -523,6 +542,161 @@ fn AstDecl* AstTranslationUnit.get_declaration(&self, usz index)
 fn usz AstTranslationUnit.declaration_count(&self)
 {
     return self.declarations.len();
+}
+
+/**
+ * Build line map from source text
+ */
+fn void AstTranslationUnit.build_line_map(&self)
+{
+    // Clear existing line map
+    self.line_map.clear();
+
+    // Line 0 always starts at offset 0
+    self.line_map.push(0);
+
+    // Scan through source text to find line breaks
+    for (usz i = 0; i < self.source_text.len; i++)
+    {
+        if (self.source_text[i] == '\n')
+        {
+            // Next line starts after this newline
+            self.line_map.push((uint)(i + 1));
+        }
+    }
+}
+
+/**
+ * Convert byte offset to line/column position
+ */
+fn SourcePosition AstTranslationUnit.offset_to_position(&self, uint offset)
+{
+    SourcePosition pos = { .line = 0, .column = 0 };
+
+    // Find the line containing this offset
+    for (usz line = 0; line < self.line_map.len(); line++)
+    {
+        uint line_start = self.line_map[line];
+
+        // Check if this is the last line or if offset is before next line
+        if (line + 1 >= self.line_map.len() || offset < self.line_map[line + 1])
+        {
+            pos.line = (uint)line;
+            pos.column = offset - line_start;
+            break;
+        }
+    }
+
+    return pos;
+}
+
+/**
+ * Convert line/column position to byte offset
+ */
+fn uint AstTranslationUnit.position_to_offset(&self, SourcePosition pos)
+{
+    if ((usz)pos.line >= self.line_map.len())
+    {
+        // Line beyond end of file, return end of file offset
+        return (uint)self.source_text.len;
+    }
+
+    uint line_start = self.line_map[pos.line];
+    uint offset = line_start + pos.column;
+
+    // Clamp to end of file
+    if ((usz)offset > self.source_text.len)
+    {
+        offset = (uint)self.source_text.len;
+    }
+
+    return offset;
+}
+
+/**
+ * Find AST node at given line/column position
+ */
+fn AstNode* AstTranslationUnit.find_node_at_position(&self, SourcePosition pos)
+{
+    uint offset = self.position_to_offset(pos);
+    return self.find_node_at_offset(offset);
+}
+
+/**
+ * Find AST node at given byte offset
+ */
+fn AstNode* AstTranslationUnit.find_node_at_offset(&self, uint offset)
+{
+    // Start search from the translation unit itself
+    return self.find_deepest_node_at_offset((AstNode*)self, offset);
+}
+
+/**
+ * Recursively find the deepest (most specific) AST node containing the given offset
+ */
+fn AstNode* AstTranslationUnit.find_deepest_node_at_offset(&self, AstNode* node, uint offset)
+{
+    if (node == null) return null;
+
+    // Special handling for TranslationUnit - search its children directly
+    if (node.kind == AST_TRANSLATION_UNIT)
+    {
+        AstTranslationUnit* tu = (AstTranslationUnit*)node;
+        for (usz i = 0; i < tu.declarations.len(); i++)
+        {
+            AstNode* child_result = self.find_deepest_node_at_offset((AstNode*)tu.declarations[i], offset);
+            if (child_result != null)
+            {
+                return child_result;
+            }
+        }
+        // If no child contains the offset, return null (don't return TranslationUnit)
+        return null;
+    }
+
+    // For other nodes, check if offset is within this node's span
+    if (offset < node.span.start || offset >= node.span.end)
+    {
+        return null;
+    }
+
+    // This node contains the offset, now check if any children contain it more specifically
+    AstNode* best_child = null;
+
+    // Check different node types for children
+    switch (node.kind)
+    {
+        case AST_DECL_IMPORT:
+            AstImportDecl* import_decl = (AstImportDecl*)node;
+            for (usz i = 0; i < import_decl.identifiers.len(); i++)
+            {
+                AstNode* child_result = self.find_deepest_node_at_offset((AstNode*)import_decl.identifiers[i], offset);
+                if (child_result != null)
+                {
+                    best_child = child_result;
+                }
+            }
+
+        case AST_EXPR_BINARY_OP:
+            AstBinaryOp* binary = (AstBinaryOp*)node;
+            AstNode* left_result = self.find_deepest_node_at_offset((AstNode*)binary.left, offset);
+            if (left_result != null) best_child = left_result;
+
+            AstNode* right_result = self.find_deepest_node_at_offset((AstNode*)binary.right, offset);
+            if (right_result != null) best_child = right_result;
+
+        case AST_EXPR_UNARY_OP:
+            AstUnaryOp* unary = (AstUnaryOp*)node;
+            AstNode* operand_result = self.find_deepest_node_at_offset((AstNode*)unary.operand, offset);
+            if (operand_result != null) best_child = operand_result;
+
+        default:
+            // For other node types, we don't traverse children yet
+            // This can be extended as needed
+    }
+
+    // Return the most specific child found, or this node if no children contain the offset
+    return best_child != null ? best_child : node;
 }
 
 /**

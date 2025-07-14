@@ -228,7 +228,9 @@ fn void Parser.synchronize(&self)
 fn AstTranslationUnit* Parser.parse(&self, String filename = "")
 {
     AstTranslationUnit* translation_unit = self.allocate_node(AstTranslationUnit);
-    translation_unit.init(filename, self.allocator);
+    translation_unit.init(filename, self.lexer.source, self.allocator);
+
+    // TranslationUnit doesn't need span info - it represents the entire file
 
     while (!self.check(TokenType.EOF) && self.error_count <= self.max_errors)
     {
@@ -711,9 +713,12 @@ fn AstDecl* Parser.parse_declaration(&self)
  */
 fn AstDecl* Parser.parse_import_declaration(&self)
 {
+    // Store the start position (import keyword)
+    SourceSpan import_start = self.previous_token.span;
+
     AstImportDecl* import_decl = self.allocate_node(AstImportDecl);
     import_decl.init(self.allocator);
-    import_decl.decl.node.span = self.previous_token.span;
+    import_decl.node.span.start = import_start.start;
 
     // Skip whitespace before first import path
     while (self.current_token.type == TokenType.WHITESPACE ||
@@ -754,6 +759,9 @@ fn AstDecl* Parser.parse_import_declaration(&self)
         // Try to recover by finding the next statement
         self.synchronize();
     }
+
+    // Set the end span to include the semicolon
+    import_decl.node.span.end = self.previous_token.span.end;
 
     return (AstDecl*)import_decl;
 }
