@@ -279,3 +279,62 @@ fn void test_update_nonexistent_file()
 		assert(false, "Expected error but function succeeded");
 	}
 }
+
+fn void test_incremental_text_changes()
+{
+	Project project;
+	project.init(tmem);
+	
+	String file_path = "/test/incremental.c3";
+	String uri = "file:///test/incremental.c3";
+	String initial_content = "import foo;\nstruct Point { int x; }\n";
+	
+	project.add_or_update_file(file_path, uri, initial_content, 1)!!;
+	
+	// Create an incremental change - replace "int x" with "int y"
+	LSPTextChange change = {
+		.range = {
+			.start_line = 1,
+			.start_character = 15,  // Position of "x"
+			.end_line = 1,
+			.end_character = 20     // After "int x"
+		},
+		.text = "int y",
+		.is_full_document = false
+	};
+	
+	LSPTextChange[] changes = { change };
+	project.apply_incremental_changes(uri, changes, 2)!!;
+	
+	SourceFile* file = project.get_file_by_uri(uri)!!;
+	assert(file.version == 2);
+	// The content should now have "int y" instead of "int x"
+	assert(file.content.contains("int y"));
+	assert(!file.content.contains("int x"));
+}
+
+fn void test_full_document_change()
+{
+	Project project;
+	project.init(tmem);
+	
+	String file_path = "/test/full_doc.c3";
+	String uri = "file:///test/full_doc.c3";
+	String initial_content = "import foo;\n";
+	
+	project.add_or_update_file(file_path, uri, initial_content, 1)!!;
+	
+	// Create a full document change
+	LSPTextChange full_change = {
+		.range = { .start_line = 0, .start_character = 0, .end_line = 0, .end_character = 0 },
+		.text = "import bar;\nstruct Test { float f; }\n",
+		.is_full_document = true
+	};
+	
+	LSPTextChange[] changes = { full_change };
+	project.apply_incremental_changes(uri, changes, 2)!!;
+	
+	SourceFile* file = project.get_file_by_uri(uri)!!;
+	assert(file.version == 2);
+	assert(file.content == "import bar;\nstruct Test { float f; }\n");
+}
