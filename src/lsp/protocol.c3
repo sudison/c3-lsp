@@ -91,7 +91,7 @@ fn LSPResponse create_response(LSPRequestId id, String result)
 fn LSPResponse? create_error_response(LSPRequestId id, LSPErrorCode code, String message)
 {
 	LSPError error = {
-		.code = (int)code,
+		.code = code.value,
 		.message = message,
 		.data = ""
 	};
