@@ -173,15 +173,9 @@ fn void test_handle_completion_request() @test
 	String completion_json = `{"jsonrpc":"2.0","id":"3","method":"textDocument/completion","params":"{\"textDocument\":{\"uri\":\"file:///test.c3\"},\"position\":{\"line\":1,\"character\":10}}"}`;
 	
 	// First add a file
-	if (catch err = server.handle_message(did_open_json))
-	{
-		io::printfn("Error: %s",err);
-	}
-
+	server.handle_message(did_open_json)!!;
 	// Request completions
-	if (catch err = server.handle_message(completion_json)) {
-		io::printfn("Error: %s",err);
-	}
+	server.handle_message(completion_json)!!;
 
 	// Should have sent a completion response
 	String response = output.str_view();
