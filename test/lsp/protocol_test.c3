@@ -49,7 +49,7 @@ fn void test_marshal_notification()
 
 fn void test_create_error_response()
 {
-	LSPResponse error_response = protocol::create_error_response("1", protocol::LSPErrorCode.METHOD_NOT_FOUND, "Method not found")!!;
+	LSPResponse error_response = protocol::create_error_response("1", protocol::LSPErrorCode.METHOD_NOT_FOUND, "Method not found", tmem)!!;
 	
 	assert(error_response.jsonrpc == "2.0", "Should have correct jsonrpc version");
 	assert(error_response.id == "1", "Should have correct ID");

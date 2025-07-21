@@ -88,7 +88,7 @@ fn LSPResponse create_response(LSPRequestId id, String result)
 	};
 }
 
-fn LSPResponse? create_error_response(LSPRequestId id, LSPErrorCode code, String message)
+fn LSPResponse? create_error_response(LSPRequestId id, LSPErrorCode code, String message, Allocator allocator)
 {
 	LSPError error = {
 		.code = code.value,
@@ -105,7 +105,7 @@ fn LSPResponse? create_error_response(LSPRequestId id, LSPErrorCode code, String
 			.jsonrpc = "2.0",
 			.id = id,
 			.result = "",
-			.error = error_output.str_view()
+			.error = error_output.copy_str(allocator)
 		};
 	};
 }

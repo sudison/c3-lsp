@@ -217,6 +217,50 @@ fn uint? SourceFile.position_to_offset(&self, String content, uint line, uint ch
 	return offset;
 }
 
+fn void? SourceFile.get_completions_at_position(&self, uint line, uint character, List{String}* keywords)
+{
+	if (!self.ast) return NO_AST_DEFINED?;
+	
+	// For now, return basic C3 keywords
+	String[] kwords = {
+		"struct", "union", "enum", "fn", "macro", "const", "var",
+		"if", "else", "while", "for", "foreach", "switch", "case", "default",
+		"return", "break", "continue", "defer", "import", "module"
+	};
+
+	foreach (keyword : kwords)
+	{
+		keywords.push(keyword.copy(self.allocator));
+	}
+}
+
+fn String? SourceFile.get_hover_info(&self, uint line, uint character)
+{
+	if (!self.ast) return NO_AST_DEFINED?;
+	
+	SourcePosition pos = { .line = line, .column = character };
+	AstNode*? node = self.ast.find_node_at_position(pos);
+	if (!@ok(node)) return INVALID_POSITION?;
+	
+	AstNode* ast_node = node!;
+	
+	// Basic hover implementation
+	switch (ast_node.kind)
+	{
+		case AST_EXPR_IDENTIFIER:
+			AstIdentifier* ident = (AstIdentifier*)ast_node;
+			return string::tformat("Identifier: %s", ident.name);
+		case AST_DECL_FUNCTION:
+			AstFunctionDecl* func = (AstFunctionDecl*)ast_node;
+			return string::tformat("Function: %s", func.name);
+		case AST_DECL_STRUCT:
+			AstStructDecl* struct_decl = (AstStructDecl*)ast_node;
+			return string::tformat("Struct: %s", struct_decl.name);
+		default:
+			return string::tformat("AST Node: %s", ast_node.kind);
+	}
+}
+
 fn bool? Project.remove_file_by_path(&self, String file_path)
 {
 	SourceFile* file = self.files_by_path.get(file_path)!;
@@ -281,51 +325,3 @@ fn usz Project.file_count(&self)
 	return self.files_by_path.len();
 }
 
-fn AstNode*? Project.find_node_at_position(&self, String uri, uint line, uint column)
-{
-	SourceFile* file = self.files_by_uri.get(uri)!;
-	if (!file.ast) return NO_AST_DEFINED?;
-	
-	SourcePosition pos = { .line = line, .column = column };
-	return file.ast.find_node_at_position(pos);
-}
-
-fn String[]? Project.get_completions_at_position(&self, String uri, uint line, uint column)
-{
-	// Basic completion implementation - can be extended
-	SourceFile* file = self.files_by_uri.get(uri)!;
-	if (!file.ast) return NO_AST_DEFINED?;
-	
-	// For now, return basic C3 keywords
-	String[] keywords = {
-		"struct", "union", "enum", "fn", "macro", "const", "var",
-		"if", "else", "while", "for", "foreach", "switch", "case", "default",
-		"return", "break", "continue", "defer", "import", "module"
-	};
-	
-	return keywords;
-}
-
-fn String? Project.get_hover_info(&self, String uri, uint line, uint column)
-{
-	AstNode*? node = self.find_node_at_position(uri, line, column);
-	if (!@ok(node)) return INVALID_POSITION?;
-	
-	AstNode* ast_node = node!;
-	
-	// Basic hover implementation
-	switch (ast_node.kind)
-	{
-		case AST_EXPR_IDENTIFIER:
-			AstIdentifier* ident = (AstIdentifier*)ast_node;
-			return string::tformat("Identifier: %s", ident.name);
-		case AST_DECL_FUNCTION:
-			AstFunctionDecl* func = (AstFunctionDecl*)ast_node;
-			return string::tformat("Function: %s", func.name);
-		case AST_DECL_STRUCT:
-			AstStructDecl* struct_decl = (AstStructDecl*)ast_node;
-			return string::tformat("Struct: %s", struct_decl.name);
-		default:
-			return string::tformat("AST Node: %s", ast_node.kind);
-	}
-}

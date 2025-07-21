@@ -1,6 +1,7 @@
 module lsp::project_tests @test;
 import lsp::project;
 import parser;
+import std::collections::list;
 
 fn void test_project_initialization()
 {
@@ -205,25 +206,27 @@ fn void test_completions_with_valid_ast()
 	project.add_or_update_file(file_path, uri, content, 1)!!;
 	
 	// Try to get completions
-	String[]? completions_result = project.get_completions_at_position(uri, 1, 10);
-	if (@ok(completions_result))
+	SourceFile* file = project.get_file_by_uri(uri)!!;
+	List{String} completions_result;
+	if (catch file.get_completions_at_position(1, 10, &completions_result))
 	{
-		String[] completions = completions_result!!;
-		assert(completions.len > 0); // Should have some keywords
-		
-		// Check for some expected C3 keywords
-		bool found_fn = false;
-		bool found_struct = false;
-		bool found_return = false;
-		
-		foreach (keyword : completions)
-		{
-			if (keyword == "fn") found_fn = true;
-			if (keyword == "struct") found_struct = true;
-			if (keyword == "return") found_return = true;
-		}
-		
-		assert(found_fn && found_struct && found_return);
+
+	} else  {
+    		assert(completions_result.len() > 0); // Should have some keywords
+
+    		// Check for some expected C3 keywords
+    		bool found_fn = false;
+    		bool found_struct = false;
+    		bool found_return = false;
+
+    		foreach (keyword : completions_result)
+    		{
+    			if (keyword == "fn") found_fn = true;
+    			if (keyword == "struct") found_struct = true;
+    			if (keyword == "return") found_return = true;
+    		}
+
+    		assert(found_fn && found_struct && found_return);
 	}
 }
 
@@ -239,7 +242,8 @@ fn void test_hover_info()
 	project.add_or_update_file(file_path, uri, content, 1)!!;
 	
 	// Try to get hover info - should work now with proper line breaks
-	String? hover_result = project.get_hover_info(uri, 1, 5);
+	SourceFile* file = project.get_file_by_uri(uri)!!;
+	String? hover_result = file.get_hover_info(1, 5);
 	// Don't assert on the result since it depends on parser implementation
 	// Just verify the function doesn't crash
 }

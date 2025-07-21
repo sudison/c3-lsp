@@ -9,6 +9,7 @@ fn int main(String[] args)
 	{
 		LSPServer server;
 		server.init_stdio(allocator::heap());
+		defer server.free();
 		
 		if (catch err = server.run())
 		{
